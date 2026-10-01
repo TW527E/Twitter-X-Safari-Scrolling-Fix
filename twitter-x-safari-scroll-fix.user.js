@@ -2,7 +2,7 @@
 // @name         X (Twitter) Safari 時間線位置修復
 // @name:en         X (Twitter) Safari timeline position fix
 // @namespace    https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix
-// @version      2.3.6
+// @version      2.3.7
 // @description  修復 Safari 從推文或其他頁面返回 X 時間線後的位置跳動，支援非 100% 頁面縮放。
 // @description:en  Fixed Safari timeline jumps after returning from a post or another page, including non-100% page zoom.
 // @author       TW527E
