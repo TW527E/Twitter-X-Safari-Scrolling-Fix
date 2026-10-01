@@ -1,4 +1,4 @@
-[繁體中文](README.md) | [English](README.en.md)
+[繁體中文](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/README.md) | [English](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/README.en.md)
 
 # X (Twitter) Safari Timeline Position Fix
 
@@ -38,7 +38,7 @@ A Tampermonkey userscript for Safari that fixes X (Twitter) returning to the wro
 3. Select the install option and confirm it in Tampermonkey.
 4. Reload `https://x.com/home`.
 
-Alternatively, create a new Tampermonkey userscript and manually paste the complete contents of [`twitter-x-safari-scroll-fix.user.js`](twitter-x-safari-scroll-fix.user.js).
+Alternatively, create a new Tampermonkey userscript and manually paste the complete contents of [`twitter-x-safari-scroll-fix.user.js`](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/twitter-x-safari-scroll-fix.user.js).
 
 ## Usage
 
@@ -99,4 +99,4 @@ Any active restoration is immediately cancelled when the user scrolls, touches t
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/LICENSE).
