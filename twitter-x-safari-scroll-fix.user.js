@@ -18,7 +18,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "2.3.6";
+  const VERSION = GM_info.script.version;
   const STORAGE_PREFIX = "x-safari-scroll-fix:v4:";
   const MAX_SNAPSHOT_AGE_MS = 6 * 60 * 60 * 1000;
   const SAVE_DEBOUNCE_MS = 100;
@@ -50,7 +50,6 @@
   let restoreToken = 0;
   let restoring = false;
   let suppressScrollSaveUntil = 0;
-  let lastUserIntentAt = 0;
   let preferredAnchor = null;
   let photoIntentAt = 0;
   let snapshotProtected = false;
@@ -59,37 +58,6 @@
   let trackedDetailTweets = new Set();
   let timelineMarkerBeforeDetail = null;
   let lastDebugSignature = "";
-
-  function readViewportMetrics() {
-    const dpr = Number(window.devicePixelRatio);
-    const viewportScale = Number(window.visualViewport?.scale);
-    const layoutWidth = Number(window.innerWidth);
-    const layoutHeight = Number(window.innerHeight);
-    return {
-      dpr: Number.isFinite(dpr) && dpr > 0 ? dpr : null,
-      viewportScale: Number.isFinite(viewportScale) && viewportScale > 0 ? viewportScale : 1,
-      layoutWidth: Number.isFinite(layoutWidth) && layoutWidth > 0 ? layoutWidth : null,
-      layoutHeight: Number.isFinite(layoutHeight) && layoutHeight > 0 ? layoutHeight : null,
-    };
-  }
-
-  function metricsChanged(previous, next) {
-    const differs = (left, right) => {
-      if (left === null || right === null || left === undefined || right === undefined) {
-        return left !== right;
-      }
-      return Math.abs(left - right) > METRICS_EPSILON;
-    };
-    const dprChanged = differs(previous?.dpr, next?.dpr);
-    const viewportScaleChanged =
-      Math.abs((previous?.viewportScale || 1) - (next?.viewportScale || 1)) > METRICS_EPSILON;
-    const layoutChanged =
-      differs(previous?.layoutWidth, next?.layoutWidth) ||
-      differs(previous?.layoutHeight, next?.layoutHeight);
-    return dprChanged || viewportScaleChanged || layoutChanged;
-  }
-
-  let viewportMetrics = readViewportMetrics();
 
   const debug = {
     version: VERSION,
@@ -107,13 +75,18 @@
       route: debug.route,
       restoring,
       snapshotProtected,
-      metrics: viewportMetrics,
+      metrics: {
+        dpr: devicePixelRatio,
+        viewportScale: visualViewport?.scale ?? 1,
+        width: innerWidth,
+        height: innerHeight,
+      },
       details: debug.details || null,
     };
     document.documentElement.dataset.xSafariScrollFixVersion = VERSION;
     document.documentElement.dataset.xSafariScrollFixState = debug.state;
     document.documentElement.dataset.xSafariScrollFixEvent = debug.event;
-    document.documentElement.dataset.xSafariScrollFixDpr = viewportMetrics.dpr?.toString() || "";
+    document.documentElement.dataset.xSafariScrollFixDpr = String(devicePixelRatio);
     document.documentElement.dataset.xSafariScrollFixDebug = JSON.stringify(payload);
 
     // dataset 會隨頁面狀態消失；只在內容改變時保存一份短 ring buffer，
@@ -128,41 +101,18 @@
     }
   }
 
-  function setNativeRestoration(value) {
-    try {
-      history.scrollRestoration = value;
-    } catch (_) {
-      // Safari 舊版本不支援時，錨點還原仍可獨立運作。
-    }
-  }
-  function refreshViewportMetrics() {
-    const nextMetrics = readViewportMetrics();
-    const changed = metricsChanged(viewportMetrics, nextMetrics);
-    viewportMetrics = nextMetrics;
-    if (!changed) return;
-
-    // Safari 返回頁面時會因工具列或 BFCache 恢復而觸發 resize。
-    // 尺寸變化只能更新座標基準，不能取消正在進行的還原。
-    debug.event = restoring ? "viewport-changed-during-restore" : "viewport-metrics-changed";
-    publishDebug();
-  }
-
-  setNativeRestoration("manual");
+  history.scrollRestoration = "manual";
 
   function pageZoomScale() {
-    const dpr = Number(viewportMetrics?.dpr);
-    if (!Number.isFinite(dpr) || dpr <= 0) return 1;
-    return dpr / REFERENCE_DEVICE_PIXEL_RATIO;
+    return devicePixelRatio / REFERENCE_DEVICE_PIXEL_RATIO;
   }
 
   function positionTolerance() {
-    const dpr = Number(viewportMetrics?.dpr);
-    return Number.isFinite(dpr) && dpr > 0 ? Math.max(MIN_POSITION_TOLERANCE_PX, 1 / dpr) : 1;
+    return Math.max(MIN_POSITION_TOLERANCE_PX, 1 / devicePixelRatio);
   }
 
   function currentScrollY() {
-    const value = Number.isFinite(window.scrollY) ? window.scrollY : window.pageYOffset;
-    return Number.isFinite(value) ? Math.max(0, value) : 0;
+    return Math.max(0, scrollY);
   }
 
   function forcePaintPulse() {
@@ -180,19 +130,11 @@
     if (y + PAINT_NUDGE_PX <= maxY) nudge = PAINT_NUDGE_PX;
     else if (y >= PAINT_NUDGE_PX) nudge = -PAINT_NUDGE_PX;
 
-    try {
-      if (nudge) {
-        scrollTo(0, y + nudge);
-        scrollTo(0, y);
-      } else {
-        scrollTo(0, y);
-      }
-      void document.documentElement?.offsetHeight;
-      void document.body?.offsetHeight;
-      return true;
-    } catch (_) {
-      return false;
-    }
+    if (nudge) scrollTo(0, y + nudge);
+    scrollTo(0, y);
+    void document.documentElement?.offsetHeight;
+    void document.body?.offsetHeight;
+    return true;
   }
 
   function applyAnchorCorrection(error) {
@@ -248,39 +190,29 @@
   }
 
   function toUrl(value = location.href) {
-    try {
-      return new URL(value, location.href);
-    } catch (_) {
-      return null;
-    }
+    return new URL(value, location.href);
   }
 
   function routeKey(value = location.href) {
     const url = toUrl(value);
-    if (!url) return "";
     // X 偶爾會替首頁附加暫時性 query；它們不應建立另一份捲動快照。
     return url.pathname === "/home" ? "/home" : `${url.pathname}${url.search}`;
   }
 
   function isHomeRoute(value = location.href) {
-    const url = toUrl(value);
-    return Boolean(url && url.pathname === "/home");
+    return toUrl(value).pathname === "/home";
   }
 
   function isTweetDetail(value = location.href) {
-    const url = toUrl(value);
-    return Boolean(url && /\/status\/\d+(?:\/|$)/.test(url.pathname));
+    return /\/status\/\d+(?:\/|$)/.test(toUrl(value).pathname);
   }
 
   function isPhotoDetail(value = location.href) {
-    const url = toUrl(value);
-    return Boolean(url && /\/status\/\d+\/photo\/\d+(?:\/|$)/.test(url.pathname));
+    return /\/status\/\d+\/photo\/\d+(?:\/|$)/.test(toUrl(value).pathname);
   }
 
   function tweetIdFromHref(href) {
-    const url = toUrl(href);
-    const match = url && url.pathname.match(/\/status\/(\d+)(?:\/|$)/);
-    return match ? match[1] : null;
+    return toUrl(href).pathname.match(/\/status\/(\d+)(?:\/|$)/)?.[1] ?? null;
   }
 
   function tweetIdForArticle(article) {
@@ -296,7 +228,7 @@
   }
 
   function anchorForArticle(article) {
-    if (!(article instanceof Element) || !article.matches('[data-testid="tweet"]')) return null;
+    if (!article) return null;
     const id = tweetIdForArticle(article);
     return id ? { id, top: article.getBoundingClientRect().top } : null;
   }
@@ -425,27 +357,21 @@
   }
 
   function saveSnapshot(article = null) {
-    refreshViewportMetrics();
     if (snapshotProtected || restoring || isTweetDetail() || !document.body) return;
 
     const key = routeKey();
-    if (!key) return;
 
     const clickedAnchor = anchorForArticle(article);
     if (clickedAnchor) preferredAnchor = { ...clickedAnchor, expiresAt: Date.now() + 1_000 };
 
-    const recentClicked =
-      preferredAnchor && preferredAnchor.expiresAt >= Date.now() ? preferredAnchor : null;
-    const anchor = clickedAnchor || recentClicked || visibleAnchor();
+    const anchor =
+      (preferredAnchor?.expiresAt >= Date.now() && preferredAnchor) || visibleAnchor();
     const snapshot = {
       // scrollY 與 DOMRect 都是 CSS pixel；保留小數，避免 125% 等比例的量化誤差。
       y: currentScrollY(),
       anchorId: anchor?.id || null,
       anchorTop: Number.isFinite(anchor?.top) ? anchor.top : null,
-      dpr: viewportMetrics.dpr,
-      viewportScale: viewportMetrics.viewportScale,
-      layoutWidth: viewportMetrics.layoutWidth,
-      layoutHeight: viewportMetrics.layoutHeight,
+      dpr: devicePixelRatio,
       savedAt: Date.now(),
     };
 
@@ -528,13 +454,11 @@
   }
 
   function restoreSnapshot(key, returningFromDetail = false) {
-    refreshViewportMetrics();
     const snapshot = loadSnapshot(key);
     if (!snapshot) return;
 
     const token = ++restoreToken;
     const startedAt = Date.now();
-    const userIntentAtStart = lastUserIntentAt;
     const staleDetailMarker = returningFromDetail ? trackedDetailMarker : null;
     const staleDetailTweets = returningFromDetail ? trackedDetailTweets : null;
     let rawScrollAttempts = 0;
@@ -543,7 +467,6 @@
     let stalledCorrectionFrames = 0;
     let lastCorrection = null;
     let paintPulseIssued = false;
-    let postGuardStarted = false;
     let postGuardUntil = 0;
     let postGuardFinishEvent = "restore-finished";
     let postGuardCorrections = 0;
@@ -566,16 +489,8 @@
     };
     publishDebug();
 
-    // 保留點進推文前的原始資料，絕不以還原後的暫時狀態覆寫。
-    writeJson(`${STORAGE_PREFIX}last-restore`, { key, snapshot, startedAt });
-
     function valid() {
-      return (
-        token === restoreToken &&
-        routeKey() === key &&
-        !isTweetDetail() &&
-        lastUserIntentAt === userIntentAtStart
-      );
+      return token === restoreToken && routeKey() === key && !isTweetDetail();
     }
 
     function finalize(success, event) {
@@ -734,26 +649,17 @@
         return;
       }
 
-      if (!postGuardStarted) {
-        postGuardStarted = true;
-        postGuardUntil = Date.now() + POST_RESTORE_GUARD_MS;
-        postGuardFinishEvent = event;
-        stableFrames = 0;
-        stalledCorrectionFrames = 0;
-        lastCorrection = null;
-        const paintPulse = forcePaintPulse();
-        debug.event = "restore-post-layout-guard";
-        debug.details = {
-          ...debug.details,
-          postGuardUntil,
-          paintPulse,
-        };
-        publishDebug();
-        requestAnimationFrame(postGuardFrame);
-        return;
-      }
-
-      finalize(true, event);
+      postGuardUntil = Date.now() + POST_RESTORE_GUARD_MS;
+      postGuardFinishEvent = event;
+      const paintPulse = forcePaintPulse();
+      debug.event = "restore-post-layout-guard";
+      debug.details = {
+        ...debug.details,
+        postGuardUntil,
+        paintPulse,
+      };
+      publishDebug();
+      requestAnimationFrame(postGuardFrame);
     }
 
     function retryRawPosition(elapsed, reason) {
@@ -1025,7 +931,6 @@
   }
 
   function handleLocationChange(reason) {
-    refreshViewportMetrics();
     const newUrl = location.href;
     if (newUrl === lastUrl) return;
 
@@ -1041,18 +946,20 @@
     if (isPhotoDetail(newUrl)) {
       photoIntentAt = Date.now();
       cancelRestore("photo-opened");
-      setNativeRestoration("auto");
+      history.scrollRestoration = "auto";
       return;
     }
 
     if (isPhotoDetail(oldUrl) || (photoIntentAt && Date.now() - photoIntentAt < PHOTO_BYPASS_MS)) {
       photoIntentAt = 0;
       cancelRestore("photo-closed");
-      requestAnimationFrame(() => requestAnimationFrame(() => setNativeRestoration("manual")));
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => (history.scrollRestoration = "manual")),
+      );
       return;
     }
 
-    if (!newKey || isTweetDetail(newUrl)) {
+    if (isTweetDetail(newUrl)) {
       cancelRestore("left-timeline");
       return;
     }
@@ -1067,9 +974,7 @@
   addEventListener(
     "pointerdown",
     (event) => {
-      refreshViewportMetrics();
       rememberTimelineMarker();
-      lastUserIntentAt = Date.now();
       if (event.button !== 0) {
         // 右鍵或中鍵不代表使用者接受目前的程式性位置，保留正確快照。
         cancelRestore("non-primary-pointer");
@@ -1087,7 +992,7 @@
         photoIntentAt = Date.now();
         preferredAnchor = null;
         snapshotProtected = true;
-        setNativeRestoration("auto");
+        history.scrollRestoration = "auto";
         return;
       }
 
@@ -1097,14 +1002,8 @@
   );
 
   addEventListener("scroll", scheduleSave, { passive: true, capture: true });
-  addEventListener("resize", refreshViewportMetrics, true);
   installDetailObserver();
   addEventListener("DOMContentLoaded", installDetailObserver, true);
-  try {
-    window.visualViewport?.addEventListener("resize", refreshViewportMetrics, { passive: true });
-  } catch (_) {
-    // Safari 舊版本可能沒有 visualViewport 事件。
-  }
   addEventListener("pagehide", () => saveSnapshot(), true);
   addEventListener(
     "visibilitychange",
@@ -1117,10 +1016,8 @@
   addEventListener(
     "wheel",
     (event) => {
-      trackDetailDom();
       // Safari 的觸控板返回手勢也是 wheel，但以水平 deltaX 為主，不能取消還原。
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-      lastUserIntentAt = Date.now();
       snapshotProtected = false;
       cancelRestore("wheel");
     },
@@ -1130,7 +1027,6 @@
   addEventListener(
     "touchstart",
     () => {
-      lastUserIntentAt = Date.now();
       snapshotProtected = false;
       cancelRestore("touchstart");
     },
@@ -1140,9 +1036,7 @@
   addEventListener(
     "keydown",
     (event) => {
-      trackDetailDom();
       if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
-        lastUserIntentAt = Date.now();
         snapshotProtected = false;
         cancelRestore("keyboard");
       }
@@ -1158,32 +1052,26 @@
   addEventListener(
     "pageshow",
     (event) => {
-      refreshViewportMetrics();
       if (event.persisted && !isTweetDetail() && !isPhotoDetail()) restoreSnapshot(routeKey());
     },
     true,
   );
 
   // Navigation API 可用時縮短 SPA 路由偵測延遲；輪詢仍作為 Safari/X 相容後備。
-  try {
-    window.navigation?.addEventListener("currententrychange", () =>
-      queueMicrotask(() => handleLocationChange("navigation")),
-    );
-  } catch (_) {
-    // 不支援 Navigation API。
-  }
+  window.navigation?.addEventListener("currententrychange", () =>
+    queueMicrotask(() => handleLocationChange("navigation")),
+  );
 
   window.setInterval(() => {
     trackDetailDom();
     rememberTimelineMarker();
-    refreshViewportMetrics();
     publishDebug();
     handleLocationChange("poll");
 
     // 圖片若在輪詢前已快速關閉，避免原生模式旗標殘留。
     if (photoIntentAt && !isPhotoDetail() && Date.now() - photoIntentAt >= PHOTO_BYPASS_MS) {
       photoIntentAt = 0;
-      setNativeRestoration("manual");
+      history.scrollRestoration = "manual";
     }
   }, 250);
 
