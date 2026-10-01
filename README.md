@@ -1,4 +1,4 @@
-[繁體中文](README.md) | [English](README.en.md)
+[繁體中文](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/README.md) | [English](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/README.en.md)
 
 # X（Twitter）Safari 時間線位置修復
 
@@ -38,7 +38,7 @@
 3. 選擇安裝腳本，並在 Tampermonkey 確認安裝。
 4. 重新載入 `https://x.com/home`。
 
-也可以建立新的 Tampermonkey 使用者腳本，手動貼入 [`twitter-x-safari-scroll-fix.user.js`](twitter-x-safari-scroll-fix.user.js) 的完整內容。
+也可以建立新的 Tampermonkey 使用者腳本，手動貼入 [`twitter-x-safari-scroll-fix.user.js`](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/twitter-x-safari-scroll-fix.user.js) 的完整內容。
 
 ## 使用方式
 
@@ -99,4 +99,4 @@ copy(sessionStorage.getItem("x-safari-scroll-fix:v4:debug-log"))
 
 ## 授權
 
-本專案採用 [MIT License](LICENSE)。
+本專案採用 [MIT License](https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix/blob/main/LICENSE)。
