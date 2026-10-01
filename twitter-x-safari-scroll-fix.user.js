@@ -32,8 +32,8 @@
   const PAINT_NUDGE_PX = 1;
   const MIN_POSITION_TOLERANCE_PX = 0.25;
   // Safari's Retina baseline on the target Mac is DPR 2 at 100% page zoom.
-  // Page zoom raises DPR (2.5 at 125%), while scrollBy still consumes the
-  // unzoomed layout-unit delta. Convert the visual DOMRect error accordingly.
+  // Page zoom raises DPR (2.5 at 125%). DOMRect and scroll deltas stay 1:1 in
+  // CSS px, but the scroll position snaps to steps of 1 / zoomScale CSS px.
   const REFERENCE_DEVICE_PIXEL_RATIO = 2;
   const MAX_STALLED_ERROR_PX = 2;
   const STALLED_CORRECTION_FRAMES = 6;
@@ -108,6 +108,10 @@
   }
 
   function positionTolerance() {
+    const zoomScale = pageZoomScale();
+    // 非 100% 縮放時 scrollY 只能整數移動，錨點每格位移 1 / zoomScale CSS px
+    // （125% 為 0.8px）。容許一整格加上 DOMRect 量化餘裕，否則會在相鄰兩格間來回校正而抖動。
+    if (Math.abs(zoomScale - 1) > METRICS_EPSILON) return 1 / zoomScale + 0.05;
     return Math.max(MIN_POSITION_TOLERANCE_PX, 1 / devicePixelRatio);
   }
 
@@ -139,7 +143,12 @@
 
   function applyAnchorCorrection(error) {
     const zoomScale = pageZoomScale();
-    const correction = error * zoomScale;
+    // 縮放時捲動與 DOMRect 是 1:1，只是位置會吸附到 1 / zoomScale 的格點。多要半格，
+    // 讓 Safari 的量化落在最近的格點；乘上 zoomScale 會在大位移時多捲 15–25% 而來回振盪。
+    const correction =
+      Math.abs(zoomScale - 1) > METRICS_EPSILON
+        ? error + Math.sign(error) / (2 * zoomScale)
+        : error;
     const beforeY = currentScrollY();
     scrollBy(0, correction);
     let afterY = currentScrollY();
@@ -540,7 +549,6 @@
       const article = articleForTweet(snapshot.anchorId, excludedArticles, snapshot.anchorTop);
 
       if (!article) {
-        retryRawPosition(elapsed, "post-guard-anchor-missing");
         requestAnimationFrame(postGuardFrame);
         return;
       }
@@ -783,6 +791,8 @@
         requestAnimationFrame(frame);
         return;
       }
+      // 錨點出現過後，快照的 scrollY 已經過時；之後再 raw scroll 只會和 X 的重新排版互相拉扯。
+      rawScrollAttempts = RAW_SCROLL_RETRY_MS.length;
 
       if (!paintPulseIssued && Math.abs(pageZoomScale() - 1) > METRICS_EPSILON) {
         paintPulseIssued = true;
@@ -861,10 +871,8 @@
             };
             publishDebug();
           } else {
-            // DOMRect reports the visual (zoomed) displacement, whereas Safari
-            // consumes scrollBy in the unzoomed layout coordinate. Convert the
-            // correction by the current page-zoom scale and fall back to a
-            // direct scrollTo when Safari quantizes the delta to no movement.
+            // applyAnchorCorrection rounds to Safari's zoomed scroll grid and
+            // falls back to a direct scrollTo when the delta quantizes to zero.
             const correctionResult = applyAnchorCorrection(error);
             corrections += 1;
             stableFrames = 0;
