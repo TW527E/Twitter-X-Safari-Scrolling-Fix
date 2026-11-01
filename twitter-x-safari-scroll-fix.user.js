@@ -2,7 +2,7 @@
 // @name         X (Twitter) Safari 時間線位置修復
 // @name:en         X (Twitter) Safari timeline position fix
 // @namespace    https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix
-// @version      2.3.7
+// @version      2.3.8
 // @description  修復 Safari 從推文或其他頁面返回 X 時間線後的位置跳動，支援非 100% 頁面縮放。
 // @description:en  Fixed Safari timeline jumps after returning from a post or another page, including non-100% page zoom.
 // @author       TW527E
@@ -83,17 +83,20 @@
       },
       details: debug.details || null,
     };
-    document.documentElement.dataset.xSafariScrollFixVersion = VERSION;
-    document.documentElement.dataset.xSafariScrollFixState = debug.state;
-    document.documentElement.dataset.xSafariScrollFixEvent = debug.event;
-    document.documentElement.dataset.xSafariScrollFixDpr = String(devicePixelRatio);
-    document.documentElement.dataset.xSafariScrollFixDebug = JSON.stringify(payload);
-
-    // dataset 會隨頁面狀態消失；只在內容改變時保存一份短 ring buffer，
-    // 下次可直接從 Safari session state 判斷卡在哪個 restore 階段。
+    // 每 250ms 輪詢都會呼叫這裡。即使值相同，寫 data-* 也會讓 X 自己和
+    // 其他擴充功能的 MutationObserver 收到 attribute 記錄，所以只在內容
+    // 改變時才寫入。
     const signature = JSON.stringify(payload);
     if (signature !== lastDebugSignature) {
       lastDebugSignature = signature;
+      document.documentElement.dataset.xSafariScrollFixVersion = VERSION;
+      document.documentElement.dataset.xSafariScrollFixState = debug.state;
+      document.documentElement.dataset.xSafariScrollFixEvent = debug.event;
+      document.documentElement.dataset.xSafariScrollFixDpr = String(devicePixelRatio);
+      document.documentElement.dataset.xSafariScrollFixDebug = signature;
+
+      // dataset 會隨頁面狀態消失；保存一份短 ring buffer，下次可直接從
+      // Safari session state 判斷卡在哪個 restore 階段。
       const log = readJson(`${STORAGE_PREFIX}debug-log`);
       const entries = Array.isArray(log) ? log.slice(-(DEBUG_LOG_LIMIT - 1)) : [];
       entries.push({ at: Date.now(), ...payload });
