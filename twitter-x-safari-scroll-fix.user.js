@@ -2,7 +2,7 @@
 // @name         X (Twitter) Safari 時間線位置修復
 // @name:en         X (Twitter) Safari timeline position fix
 // @namespace    https://github.com/TW527E/Twitter-X-Safari-Scrolling-Fix
-// @version      2.3.8
+// @version      2.3.9
 // @description  修復 Safari 從推文或其他頁面返回 X 時間線後的位置跳動，支援非 100% 頁面縮放。
 // @description:en  Fixed Safari timeline jumps after returning from a post or another page, including non-100% page zoom.
 // @author       TW527E
@@ -72,7 +72,8 @@
       version: VERSION,
       state: debug.state,
       event: debug.event,
-      route: debug.route,
+      // The log is meant to be pasted into bug reports; keep search terms and other query values out of it.
+      route: typeof debug.route === "string" ? debug.route.replace(/\?.*$/, "?[redacted]") : debug.route,
       restoring,
       snapshotProtected,
       metrics: {
@@ -475,6 +476,7 @@
     const staleDetailTweets = returningFromDetail ? trackedDetailTweets : null;
     let rawScrollAttempts = 0;
     let stableFrames = 0;
+    let rawStableFrames = 0;
     let corrections = 0;
     let stalledCorrectionFrames = 0;
     let lastCorrection = null;
@@ -789,6 +791,17 @@
         stableFrames = 0;
         stalledCorrectionFrames = 0;
         lastCorrection = null;
+        // 沒有推文錨點的快照（通知等頁面）永遠找不到 article；原始位置到達並穩定後
+        // 就算完成，否則會一路重試到逾時並讓 snapshotProtected 卡住。
+        if (snapshot.anchorId == null && Math.abs(currentScrollY() - Number(snapshot.y)) <= MAX_STALLED_ERROR_PX) {
+          rawStableFrames += 1;
+          if (rawStableFrames >= 12 && elapsed >= RESTORE_SETTLE_MS) {
+            finish(true, "restore-finished-raw");
+            return;
+          }
+        } else {
+          rawStableFrames = 0;
+        }
         // 第一次嘗試時虛擬列表可能還沒有足夠高度，因此採有限次退避重試。
         retryRawPosition(elapsed, "anchor-missing");
         requestAnimationFrame(frame);
@@ -1063,7 +1076,11 @@
   addEventListener(
     "pageshow",
     (event) => {
-      if (event.persisted && !isTweetDetail() && !isPhotoDetail()) restoreSnapshot(routeKey());
+      // BFCache 命中時 persisted 為真。未命中時 Safari 會重新建立頁面，而原生還原已被
+      // 本腳本關閉，所以「上一頁／下一頁」造成的全新載入也要套用快照。
+      const backForward = !event.persisted &&
+        performance.getEntriesByType?.("navigation")?.[0]?.type === "back_forward";
+      if ((event.persisted || backForward) && !isTweetDetail() && !isPhotoDetail()) restoreSnapshot(routeKey());
     },
     true,
   );

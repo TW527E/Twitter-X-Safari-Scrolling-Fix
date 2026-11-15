@@ -82,6 +82,8 @@ devicePixelRatio
 copy(sessionStorage.getItem("x-safari-scroll-fix:v4:debug-log"))
 ```
 
+紀錄只保留路徑（網址的查詢參數會被移除），但仍包含你最近瀏覽的頁面路徑、時間與推文 ID；公開張貼前請先檢查並刪掉不想公開的部分。
+
 ## 實作方式
 
 腳本會在離開時間線前保存：
