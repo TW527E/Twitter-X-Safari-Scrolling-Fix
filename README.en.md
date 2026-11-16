@@ -82,6 +82,8 @@ When reporting a jump, run this in the Console right after it happens and attach
 copy(sessionStorage.getItem("x-safari-scroll-fix:v4:debug-log"))
 ```
 
+The log keeps paths only (query strings are removed), but it still contains the paths you recently visited, timestamps and tweet IDs. Check it and remove anything you do not want public before posting.
+
 ## How It Works
 
 Before leaving a timeline, the script saves:
