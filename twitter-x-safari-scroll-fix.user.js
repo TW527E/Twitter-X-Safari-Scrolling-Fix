@@ -486,6 +486,7 @@
     let postGuardCorrections = 0;
     let postGuardStalledFrames = 0;
     let postGuardLastCorrection = null;
+    let lastRawGuardAt = 0;
     const correctionHistory = [];
     const postGuardHistory = [];
 
@@ -554,6 +555,37 @@
       const article = articleForTweet(snapshot.anchorId, excludedArticles, snapshot.anchorTop);
 
       if (!article) {
+        // 沒有錨點的頁面（通知等）只能看原始位置：X 延遲排版把它重設時要拉回來，
+        // 否則會在錯的位置宣告還原成功。使用者捲動會取消還原，不會和這裡互相拉扯。
+        const drift = currentScrollY() - Number(snapshot.y);
+        const maxY = Math.max(0, (document.scrollingElement?.scrollHeight || 0) - innerHeight);
+        if (
+          snapshot.anchorId == null &&
+          Number.isFinite(drift) &&
+          Math.abs(drift) > MAX_STALLED_ERROR_PX &&
+          // 頁面還不夠高時拉不回去，等排版長出高度；同時限制拉回的頻率。
+          maxY + MAX_STALLED_ERROR_PX >= Number(snapshot.y) &&
+          Date.now() - lastRawGuardAt >= 150
+        ) {
+          lastRawGuardAt = Date.now();
+          const beforeY = currentScrollY();
+          scrollTo(0, snapshot.y);
+          postGuardCorrections += 1;
+          // 拉回後重新計算觀察期，確認新位置也穩定。
+          postGuardUntil = Math.max(postGuardUntil, Date.now() + POST_RESTORE_GUARD_MS / 2);
+          debug.event = "raw-position-post-guard";
+          debug.details = {
+            requestedY: snapshot.y,
+            beforeY,
+            actualY: currentScrollY(),
+            postGuardCorrections,
+          };
+          publishDebug();
+          if (postGuardCorrections > RAW_SCROLL_RETRY_MS.length + 3) {
+            finalize(false, "restore-raw-drifted");
+            return;
+          }
+        }
         requestAnimationFrame(postGuardFrame);
         return;
       }
